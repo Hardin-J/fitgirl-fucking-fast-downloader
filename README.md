@@ -6,10 +6,11 @@ A Python CLI tool for automatically downloading all `.rar` game files from a Fit
 
 - 🕷️ **Auto-scrape** — reads all `fuckingfast.co` links from the paste page
 - 🤖 **Headless Chromium** — uses Playwright to resolve real CDN download URLs
+- 🔘 **Interactive Selection** — choose which optional files to skip or download
 - 📥 **Streaming downloads** — efficient chunked downloads with live progress bars
 - ♻️ **Resume support** — skips files that are already fully downloaded
 - 📊 **Rich terminal UI** — per-file speed, ETA, and a final summary table
-- 🧪 **Dry-run mode** — preview all links without downloading
+- 🧪 **Dry-run mode** — preview all links and selection results without downloading
 
 ---
 
@@ -47,6 +48,8 @@ python downloader.py --url "<paste_page_url>" --output "<download_directory>"
 | `--delay` | ❌ | `2.0` | Seconds to wait between URL resolves (reduces IP block risk) |
 | `--dry-run` | ❌ | off | Print all found links without downloading |
 | `--no-resume` | ❌ | off | Re-download files even if they already exist |
+| `--all-optional`| ❌ | off | Automatically select all optional files |
+| `--no-optional` | ❌ | off | Automatically skip all optional files |
 
 ---
 
@@ -69,7 +72,24 @@ python downloader.py \
   --url "https://paste.fitgirl-repacks.site/?d0f6e0541d9a75f6#..." \
   --output ~/Downloads/WWE_2K23 \
   --delay 5
+
+# Automated (Skip all optional files, no prompt)
+python downloader.py \
+  --url "https://paste.fitgirl-repacks.site/?d0f6e0541d9a75f6#..." \
+  --output ~/Downloads/WWE_2K23 \
+  --no-optional
 ```
+
+---
+
+## Interactive Selection
+
+The tool automatically identifies files containing "optional" in their name and groups them into components (e.g., all parts of an optional pack are treated as one item). 
+
+When optional files are found, the script will pause and prompt you:
+1. Enter numbers (e.g., `1, 2`) to select specific packs.
+2. Type `all` to download every file found.
+3. Type `none` or press Enter to skip all optional files and only download the required base files.
 
 ---
 
@@ -80,6 +100,9 @@ Paste Page URL
      │
      ▼
 [scraper.py]  ──── Fetches paste page HTML, extracts all fuckingfast.co links
+     │
+     ▼
+[downloader.py]  ── (New Selection Step) Categorizes and prompts for optional files
      │
      ▼
 [fuckingfast.py] ── Launches headless Chromium, clicks the download button,

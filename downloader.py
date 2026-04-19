@@ -18,10 +18,12 @@ Options:
 
 import argparse
 import asyncio
+import re
 import sys
 import time
+from collections import defaultdict
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from rich import print as rprint
 from rich.console import Console
@@ -38,6 +40,7 @@ from rich.progress import (
     TimeRemainingColumn,
     TransferSpeedColumn,
 )
+from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
@@ -96,6 +99,88 @@ def print_summary(results: List[DownloadResult]):
     )
 
 
+# ── File Selection Logic ───────────────────────────────────────────────────────
+
+def categorize_files(links: List[DownloadLink]) -> tuple[List[DownloadLink], Dict[str, List[DownloadLink]]]:
+    """
+    Split links into required and optional.
+    Optional files are grouped by their base name (ignoring .partXX.rar).
+    """
+    required = []
+    optional_groups = defaultdict(list)
+
+    # Patterns for optional files
+    # Usually "fg-optional" or "optional"
+    optional_re = re.compile(r"optional", re.IGNORECASE)
+
+    for link in links:
+        if optional_re.search(link.filename):
+            # Extract group name (everything before .partXX.rar or .rar)
+            # example: fg-optional-limited-edition.part01.rar -> fg-optional-limited-edition
+            group_name = re.sub(r"\.part\d+\.rar$|\.rar$", "", link.filename)
+            optional_groups[group_name].append(link)
+        else:
+            required.append(link)
+
+    return required, dict(optional_groups)
+
+
+def get_user_selection(optional_groups: Dict[str, List[DownloadLink]], auto_opt: Optional[bool]) -> List[DownloadLink]:
+    """
+    Ask the user which optional file groups they want to download.
+    Returns the list of selected links.
+    """
+    if not optional_groups:
+        return []
+
+    # Handle auto-flags
+    if auto_opt is True:  # --all-optional
+        all_links = []
+        for links in optional_groups.values():
+            all_links.extend(links)
+        return all_links
+    if auto_opt is False:  # --no-optional
+        return []
+
+    console.print("\n[bold yellow]Optional files detected![/bold yellow]")
+    console.print("The following optional components are available:")
+
+    group_keys = sorted(optional_groups.keys())
+    for i, key in enumerate(group_keys, 1):
+        count = len(optional_groups[key])
+        size_hint = f" ({count} parts)" if count > 1 else ""
+        console.print(f"  [bold cyan]{i}.[/bold cyan] {key}{size_hint}")
+
+    console.print("\n[dim]Enter numbers separated by commas (e.g. 1, 3), 'all', or 'none'.[/dim]")
+    choice = Prompt.ask(
+        "Which optional files do you want to download?",
+        default="none",
+    ).strip().lower()
+
+    if choice in ("none", ""):
+        return []
+    if choice == "all":
+        selected_links = []
+        for links in optional_groups.values():
+            selected_links.extend(links)
+        return selected_links
+
+    selected_links = []
+    try:
+        # Parse choices like "1, 2, 4"
+        indices = [int(x.strip()) for x in choice.replace(",", " ").split() if x.strip()]
+        for idx in indices:
+            if 1 <= idx <= len(group_keys):
+                selected_links.extend(optional_groups[group_keys[idx - 1]])
+            else:
+                console.print(f"[yellow]Warning: Invalid index {idx} ignored.[/yellow]")
+    except ValueError:
+        console.print("[red]Invalid input format. Skipping all optional files.[/red]")
+        return []
+
+    return selected_links
+
+
 # ── Core logic ─────────────────────────────────────────────────────────────────
 
 async def run(
@@ -104,6 +189,7 @@ async def run(
     delay: float,
     dry_run: bool,
     resume: bool,
+    auto_opt: Optional[bool] = None,
 ):
     print_banner()
 
@@ -124,11 +210,22 @@ async def run(
 
     console.print(f"  [green]Found {len(links)} download link(s)[/green]")
 
+    # ── Step 1.1: Selection ───────────────────────────────────────────────────
+    required, optional_groups = categorize_files(links)
+    
+    if optional_groups:
+        console.print(f"  [blue]{len(required)} required files, {len(optional_groups)} optional components[/blue]")
+        selected_optional = get_user_selection(optional_groups, auto_opt)
+        links = required + selected_optional
+    else:
+        links = required
+
     if dry_run:
-        console.rule("[bold yellow]Dry Run — Links found[/bold yellow]")
+        console.rule("[bold yellow]Dry Run — Selection results[/bold yellow]")
+        if not links:
+            console.print("[yellow]No files selected for download.[/yellow]")
         for i, lnk in enumerate(links, 1):
             console.print(f"  [dim]{i:>4}.[/dim] [cyan]{lnk.filename}[/cyan]")
-            console.print(f"        [dim]{lnk.url}[/dim]")
         console.print(f"\n[bold]Total: {len(links)} file(s). (dry-run, nothing downloaded)[/bold]")
         return
 
@@ -237,11 +334,22 @@ def main():
     parser.add_argument("--delay", type=float, default=2.0, help="Seconds between URL resolves (default: 2)")
     parser.add_argument("--dry-run", action="store_true", help="Show links without downloading")
     parser.add_argument("--no-resume", action="store_true", help="Re-download existing files")
+    
+    opt_group = parser.add_mutually_exclusive_group()
+    opt_group.add_argument("--all-optional", action="store_true", help="Automatically select all optional files")
+    opt_group.add_argument("--no-optional", action="store_true", help="Automatically skip all optional files")
 
     args = parser.parse_args()
 
     output_dir = Path(args.output).expanduser().resolve()
     resume = not args.no_resume
+    
+    # Determine auto-optional preference
+    auto_opt = None
+    if args.all_optional:
+        auto_opt = True
+    elif args.no_optional:
+        auto_opt = False
 
     asyncio.run(run(
         paste_url=args.url,
@@ -249,6 +357,7 @@ def main():
         delay=args.delay,
         dry_run=args.dry_run,
         resume=resume,
+        auto_opt=auto_opt,
     ))
 
 

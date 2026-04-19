@@ -16,9 +16,9 @@ from typing import Optional
 
 
 # Matches the real CDN URL in the download() function
-# e.g.: window.open("https://fuckingfast.co/dl/...")
+# e.g.: window.open("https://dl.fuckingfast.co/dl/...")
 DL_URL_RE = re.compile(
-    r'window\.open\(["\'](' + re.escape("https://fuckingfast.co/dl/") + r'[^"\']+)["\']',
+    r'window\.open\(["\'](https?://(?:dl\.)?fuckingfast\.co/dl/[^"\']+)["\']',
     re.IGNORECASE,
 )
 
@@ -77,8 +77,9 @@ async def _try_resolve(page_url: str, timeout: int) -> Optional[str]:
             const scripts = Array.from(document.querySelectorAll('script'));
             for (const script of scripts) {
                 const src = script.innerText || script.textContent || '';
-                // Match window.open("https://fuckingfast.co/dl/...")
-                const match = src.match(/window\\.open\\(["'](https:\\/\\/fuckingfast\\.co\\/dl\\/[^"']+)["']/);
+                // Match window.open("https://dl.fuckingfast.co/dl/...")
+                // or the older "https://fuckingfast.co/dl/..."
+                const match = src.match(/window\\.open\\(["'](https?:\\/\\/(?:dl\\.)?fuckingfast\\.co\\/dl\\/[^"']+)["']/);
                 if (match) return match[1];
             }
             return null;
